@@ -47,6 +47,8 @@ class Net(nn.Module):
         return F.log_softmax(x, dim=1)
 
     def UORO_update_step(self, Q):
+        """Runs UORO for one step to update the rank-1 approximation of \Gamma,
+        via A and B."""
 
         self.nu = np.random.choice([-1, 1], Q.shape)
         grad = self.flatten_array([p.grad.data.numpy() for p in self.parameters()])
@@ -62,10 +64,10 @@ class Net(nn.Module):
         self.A = self.rho_0 * self.A_forwards + self.rho_1 * self.nu
         self.B = (1 / self.rho_0) * self.B + (1 / self.rho_1) * self.M_projection
 
-    def get_updated_eta(self, mlr, test_grad):
+    def get_updated_eta(self, mlr, val_grad):
 
-        test_grad = self.flatten_array(test_grad)
-        self.eta -= mlr * (test_grad.dot(self.A)) * self.B
+        val_grad = self.flatten_array(val_grad)
+        self.eta -= mlr * (val_grad.dot(self.A)) * self.B
         self.eta = np.maximum(0, self.eta)
 
         return np.copy(self.unflatten_array(self.eta))

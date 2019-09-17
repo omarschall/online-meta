@@ -237,6 +237,18 @@ def plot_array_of_downsampled_signals(signals, ticks=None, return_fig=False,
 
     if return_fig:
         return fig
+    
+def init_random_MLP_params(layer_sizes):
+    
+    params = []
+    
+    for i in range(1, len(layer_sizes)):
+        sigma = 1/np.sqrt(layer_sizes[i-1])
+        shape = (layer_sizes[i-1], layer_sizes[i])
+        params.append(np.random.normal(0, sigma, shape))
+        params.append(np.zeros(layer_sizes[i]))
+        
+    return params
 
 ### --- Programming tools --- ###
 
