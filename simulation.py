@@ -10,7 +10,7 @@ from torchvision import datasets, transforms
 import numpy as np
 from itertools import cycle
 from utils import *
-from copy import copy
+from copy import copy, deepcopy
 
 class Simulation:
 
@@ -22,6 +22,7 @@ class Simulation:
         self.monitors = monitors
         self.Hess_est_r = Hess_est_r
         self.mlr = mlr
+        self.update_optimizer_online = True
 
         self.report_interval = 1000
         self.__dict__.update(kwargs)
@@ -71,64 +72,87 @@ class Simulation:
         if self.mode == 'train':
     
             # Approximate the Hessian
-            A = self.model.unflatten_array(self.model.A)
-    
-            model_plus = copy(self.model)
-            for p, a in zip(model_plus.parameters(), A):
-                perturbation = torch.from_numpy(self.Hess_est_r * a).type(torch.FloatTensor)
-                p.data += perturbation
-    
+            if self.model.name == 'Private_LR':
+                A = self.model.unflatten_array(self.model.A)
+            elif self.model.name == 'Global_LR':
+                A = self.model.unflatten_array(self.model.Gamma)
+        
+            
+            model_plus = deepcopy(self.model)
+#            for p in model_plus.parameters():
+#                print(p.data[0][0])
+#                break
+            for param, direction in zip(model_plus.parameters(), A):
+                perturbation = torch.from_numpy(self.Hess_est_r * direction).type(torch.FloatTensor)
+                param.data.add_(perturbation)
+#            for p in model_plus.parameters():
+#                print(p.data[0][0])
+#                break
             model_plus.train()
             output = model_plus(data)
             loss = F.nll_loss(output, target)
             loss.backward()
     
-            model_minus = copy(self.model)
-            for p, a in zip(model_minus.parameters(), A):
-                perturbation = torch.from_numpy(self.Hess_est_r * a).type(torch.FloatTensor)
-                p.data -= perturbation
-    
+            model_minus = deepcopy(self.model)
+#            for p in model_minus.parameters():
+#                print(p.data[0][0])
+#                break
+            for param, direction in zip(model_minus.parameters(), A):
+                perturbation = torch.from_numpy(self.Hess_est_r * direction).type(torch.FloatTensor)
+                param.data.add_(-perturbation)
+#            for p in model_minus.parameters():
+#                print(p.data[0][0])
+#                break
+            
             model_minus.train()
-            output = model_plus(data)
+            output = model_minus(data)
             loss = F.nll_loss(output, target)
             loss.backward()
+            
+#            for p in self.model.parameters():
+#                print(p.data[0][0])
+#                break
     
+            #set_trace()
+            
             g_plus = [p.grad.data for p in model_plus.parameters()]
             g_minus = [p.grad.data for p in model_minus.parameters()]
             Q = (self.model.flatten_array(g_plus) -
                  self.model.flatten_array(g_minus)) / (2 * self.Hess_est_r)
     
+            #set_trace()
+    
             val_grad = self.get_val_grad()
-            self.model.UORO_update_step(Q)
-            new_eta = self.model.get_updated_eta(self.mlr, val_grad=val_grad)
+            self.model.update_Gamma(Q)
+            self.model.update_eta(self.mlr, val_grad=val_grad)
     
-            # set_trace()
-    
-            for lr, eta in zip(self.optimizer.param_groups[0]['lr'], new_eta):
-                lr.data = torch.from_numpy(eta).type(torch.FloatTensor)
+            #Update optimizer with new eta
+            if self.update_optimizer_online:
+                self.update_optimizer_by_eta()
             
         return training_loss
 
     def test(self):
         self.model.eval()
-        test_loss = 0
+        self.test_loss = 0
         correct = 0
         with torch.no_grad():
             for data, target in self.test_loader:
                 output = self.model(data)
-                test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
+                self.test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
                 pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
                 correct += pred.eq(target.view_as(pred)).sum().item()
 
-        test_loss /= len(self.test_loader.dataset)
-
+        self.test_loss /= len(self.test_loader.dataset)
+        
         print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-            test_loss, correct, len(self.test_loader.dataset),
+            self.test_loss, correct, len(self.test_loader.dataset),
             100. * correct / len(self.test_loader.dataset)))
 
+        self.correct = correct
 
     def get_val_grad(self):
-        val_model = copy(self.model)
+        val_model = deepcopy(self.model)
         val_model.train()
         data, target = next(self.val_loader)
             
@@ -137,6 +161,27 @@ class Simulation:
         test_loss.backward()
 
         return [p.grad.data.numpy() for p in val_model.parameters()]
+    
+    def update_optimizer_by_eta(self):
+        """Updates the optimizer used by the simulation with the new eta values
+        from the model."""
+        if self.model.name == 'Private_LR':
+            new_eta = self.model.unflatten_array(self.model.eta)
+            for lr, eta in zip(self.optimizer.param_groups[0]['lr'], new_eta):
+                lr.data = torch.from_numpy(eta).type(torch.FloatTensor)
+            # Get means by layer
+            self.layer_wise_means = []
+            self.layer_wise_stds = []
+            for i_param in range(0, len(new_eta), 2):
+                mean = np.concatenate([new_eta[i_param].flatten(),
+                                       new_eta[i_param+1].flatten()]).mean()
+                self.layer_wise_means.append(mean)
+                std = np.concatenate([new_eta[i_param].flatten(),
+                                       new_eta[i_param+1].flatten()]).std()
+                self.layer_wise_stds.append(std)
+                
+        elif self.model.name == 'Global_LR':
+            self.optimizer.param_groups[0]['lr'] = np.copy(self.model.eta)
     
     def update_monitors(self):
         """Loops through the monitor keys and appends current value of any

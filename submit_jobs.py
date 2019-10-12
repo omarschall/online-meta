@@ -108,6 +108,7 @@ def write_job_file(job_name,
             + 'SAVEPATH={}library/{}\n'.format(scratch_path, job_name)
             + 'export SAVEPATH\n'
             + 'module load python3/intel/3.6.3\n'
+            + 'source torch/bin/activate\n'
             + 'cd {}\n'.format(scratch_path)
             + 'pwd > {}.log\n'.format(log_name)
             + 'date >> {}.log\n'.format(log_name)

@@ -6,14 +6,17 @@ Created on Thu Jan  3 12:08:30 2019
 @author: omarschall
 """
 
-import matplotlib.pyplot as plt
+try:
+    import matplotlib.pyplot as plt
+except ModuleNotFoundError:
+    pass
 import numpy as np
 import itertools
-from scipy.stats import unitary_group
-from scipy.signal import decimate
+#from scipy.stats import unitary_group
+#from scipy.signal import decimate
 from functools import reduce
 from pdb import set_trace
-from scipy.ndimage.filters import uniform_filter1d
+#from scipy.ndimage.filters import uniform_filter1d
 
 ### --- Mathematical tools --- ###
 
@@ -244,7 +247,7 @@ def init_random_MLP_params(layer_sizes):
     
     for i in range(1, len(layer_sizes)):
         sigma = 1/np.sqrt(layer_sizes[i-1])
-        shape = (layer_sizes[i-1], layer_sizes[i])
+        shape = (layer_sizes[i], layer_sizes[i-1])
         params.append(np.random.normal(0, sigma, shape))
         params.append(np.zeros(layer_sizes[i]))
         
